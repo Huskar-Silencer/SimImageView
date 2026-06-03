@@ -1,9 +1,9 @@
 """Main window for the image viewer application"""
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar, QMessageBox, QDialog
+    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar, QMessageBox, QDialog, QPushButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QImage
 from PySide6.QtCore import Qt, QSize, QTimer
 from pathlib import Path
 import logging
@@ -22,50 +22,59 @@ class ImagePropertiesDialog(QDialog):
     def __init__(self, parent, file_path, pixmap):
         super().__init__(parent)
         self.setWindowTitle("Image Properties")
-        self.setGeometry(100, 100, 400, 300)
+        self.setGeometry(100, 100, 500, 400)
         self.setup_ui(file_path, pixmap)
     
     def setup_ui(self, file_path, pixmap):
         """Setup the dialog UI"""
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
         
         # Get file information
-        file_path = Path(file_path)
-        file_size = file_path.stat().st_size
+        file_path_obj = Path(file_path)
+        file_size = file_path_obj.stat().st_size
         file_size_str = self.format_file_size(file_size)
         
-        # Get image information
+        # Get image information from pixmap
         img_width = pixmap.width()
         img_height = pixmap.height()
-        img_format = pixmap.format()
+        
+        # Get image format from QImage
+        image = QImage(file_path)
+        img_format = image.format() if not image.isNull() else QImage.Format_Invalid
         
         # Create labels
         properties = [
-            ("File Name:", file_path.name),
-            ("File Path:", str(file_path)),
+            ("File Name:", file_path_obj.name),
+            ("File Path:", str(file_path_obj)),
             ("File Size:", file_size_str),
             ("Image Width:", f"{img_width} px"),
             ("Image Height:", f"{img_height} px"),
             ("Dimensions:", f"{img_width} × {img_height}"),
-            ("Format:", self.format_to_string(img_format)),
-            ("File Type:", file_path.suffix.upper()),
+            ("Color Format:", self.format_to_string(img_format)),
+            ("File Type:", file_path_obj.suffix.upper().lstrip(".")),
         ]
         
         for label_text, value_text in properties:
             row_layout = QHBoxLayout()
             label = QLabel(label_text)
-            label.setStyleSheet("font-weight: bold; min-width: 100px;")
+            label.setStyleSheet("font-weight: bold; min-width: 120px;")
+            label.setMinimumWidth(120)
             value = QLabel(value_text)
             value.setWordWrap(True)
+            value.setStyleSheet("color: #333333;")
             row_layout.addWidget(label)
             row_layout.addWidget(value)
+            row_layout.addStretch()
             layout.addLayout(row_layout)
         
         layout.addStretch()
         
         # Close button
-        close_button = self.buttonBox = QMessageBox()
-        close_button = QMessageBox()
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        layout.addWidget(close_button)
     
     @staticmethod
     def format_file_size(size_bytes):
@@ -466,5 +475,19 @@ class MainWindow(QMainWindow):
             }
             QDialog {
                 background-color: #f5f5f5;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #106ebe;
+            }
+            QPushButton:pressed {
+                background-color: #0066b2;
             }
         """

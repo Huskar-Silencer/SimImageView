@@ -1,7 +1,7 @@
 """Image viewer widget for displaying and manipulating images"""
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QApplication
 from PySide6.QtGui import QPixmap, QPainter, QTransform
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QRect
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QRect, QSize
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ class ImageCanvas(QWidget):
         self.pan_offset = QPoint(0, 0)
         self.is_panning = False
         self.pan_start = QPoint(0, 0)
+        
+        self.setMinimumSize(QSize(400, 400))
 
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
@@ -87,11 +89,18 @@ class ImageCanvas(QWidget):
         self.update_transformed_pixmap()
         self.update()
 
+    def sizeHint(self):
+        """Return preferred size"""
+        if self.transformed_pixmap:
+            return self.transformed_pixmap.size()
+        return QSize(600, 600)
+
     def paintEvent(self, event):
         """Paint the image on the canvas"""
-        if not self.transformed_pixmap:
-            painter = QPainter(self)
-            painter.fillRect(self.rect(), Qt.gray)
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.white)
+        
+        if not self.pixmap:
             painter.drawText(
                 self.rect(),
                 Qt.AlignCenter,
@@ -99,14 +108,11 @@ class ImageCanvas(QWidget):
             )
             return
 
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), Qt.white)
-
-        # Calculate position to center the image
-        x = (self.width() - self.transformed_pixmap.width()) // 2 + self.pan_offset.x()
-        y = (self.height() - self.transformed_pixmap.height()) // 2 + self.pan_offset.y()
-
-        painter.drawPixmap(x, y, self.transformed_pixmap)
+        if self.transformed_pixmap:
+            # Calculate position to center the image
+            x = (self.width() - self.transformed_pixmap.width()) // 2 + self.pan_offset.x()
+            y = (self.height() - self.transformed_pixmap.height()) // 2 + self.pan_offset.y()
+            painter.drawPixmap(x, y, self.transformed_pixmap)
 
     def wheelEvent(self, event):
         """Handle mouse wheel for zooming"""
@@ -156,12 +162,13 @@ class ImageViewerWidget(QWidget):
 
     def setup_ui(self):
         """Initialize UI"""
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         scroll_area = QScrollArea()
         scroll_area.setWidget(self.canvas)
-        scroll_area.setWidgetResizable(False)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setAlignment(Qt.AlignCenter)
         scroll_area.setStyleSheet("""
             QScrollArea {
                 background-color: #f0f0f0;

@@ -1,7 +1,7 @@
 """Image viewer widget for displaying and manipulating images"""
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QApplication
 from PySide6.QtGui import QPixmap, QPainter, QTransform
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve, QEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve, QEvent, Property, QPointF
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,25 +16,25 @@ class ImageCanvas(QWidget):
         super().__init__()
         self.pixmap = None
         self.transformed_pixmap = None
-        self.zoom_factor = 1.0
-        self.target_zoom_factor = 1.0
+        self._zoom_factor = 1.0
         self.rotation_angle = 0
+        self._pan_offset_x = 0
+        self._pan_offset_y = 0
         self.pan_offset = QPoint(0, 0)
-        self.target_pan_offset = QPoint(0, 0)
         self.is_panning = False
         self.pan_start = QPoint(0, 0)
-        self.last_mouse_pos = QPoint(0, 0)
+        self.last_mouse_pos = QPointF(0, 0)
         
         # Animation
-        self.zoom_animation = QPropertyAnimation(self, b"zoomFactor")
+        self.zoom_animation = QPropertyAnimation(self, b"zoom_factor")
         self.zoom_animation.setDuration(200)
         self.zoom_animation.setEasingCurve(QEasingCurve.OutCubic)
         
-        self.pan_animation_x = QPropertyAnimation(self, b"panOffsetX")
+        self.pan_animation_x = QPropertyAnimation(self, b"pan_offset_x")
         self.pan_animation_x.setDuration(200)
         self.pan_animation_x.setEasingCurve(QEasingCurve.OutCubic)
         
-        self.pan_animation_y = QPropertyAnimation(self, b"panOffsetY")
+        self.pan_animation_y = QPropertyAnimation(self, b"pan_offset_y")
         self.pan_animation_y.setDuration(200)
         self.pan_animation_y.setEasingCurve(QEasingCurve.OutCubic)
         
@@ -42,49 +42,51 @@ class ImageCanvas(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
 
-    @property
-    def zoomFactor(self):
+    @Property(float)
+    def zoom_factor(self):
         """Get zoom factor for animation"""
-        return self.zoom_factor
+        return self._zoom_factor
     
-    @zoomFactor.setter
-    def zoomFactor(self, value):
+    @zoom_factor.setter
+    def zoom_factor(self, value):
         """Set zoom factor for animation"""
-        self.zoom_factor = value
+        self._zoom_factor = value
         self.update_transformed_pixmap()
         self.update()
         self.zoom_changed.emit(value)
     
-    @property
-    def panOffsetX(self):
+    @Property(int)
+    def pan_offset_x(self):
         """Get pan offset X for animation"""
-        return self.pan_offset.x()
+        return self._pan_offset_x
     
-    @panOffsetX.setter
-    def panOffsetX(self, value):
+    @pan_offset_x.setter
+    def pan_offset_x(self, value):
         """Set pan offset X for animation"""
-        self.pan_offset.setX(int(value))
+        self._pan_offset_x = int(value)
+        self.pan_offset.setX(self._pan_offset_x)
         self.update()
     
-    @property
-    def panOffsetY(self):
+    @Property(int)
+    def pan_offset_y(self):
         """Get pan offset Y for animation"""
-        return self.pan_offset.y()
+        return self._pan_offset_y
     
-    @panOffsetY.setter
-    def panOffsetY(self, value):
+    @pan_offset_y.setter
+    def pan_offset_y(self, value):
         """Set pan offset Y for animation"""
-        self.pan_offset.setY(int(value))
+        self._pan_offset_y = int(value)
+        self.pan_offset.setY(self._pan_offset_y)
         self.update()
 
     def set_image(self, pixmap):
         """Set the image to display"""
         self.pixmap = pixmap
-        self.zoom_factor = 1.0
-        self.target_zoom_factor = 1.0
+        self._zoom_factor = 1.0
         self.rotation_angle = 0
+        self._pan_offset_x = 0
+        self._pan_offset_y = 0
         self.pan_offset = QPoint(0, 0)
-        self.target_pan_offset = QPoint(0, 0)
         self.update_transformed_pixmap()
         self.update()
 
@@ -99,7 +101,7 @@ class ImageCanvas(QWidget):
         rotated = self.pixmap.transformed(transform, Qt.SmoothTransformation)
 
         # Apply zoom
-        new_size = rotated.size() * self.zoom_factor
+        new_size = rotated.size() * self._zoom_factor
         self.transformed_pixmap = rotated.scaledToWidth(
             max(int(new_size.width()), 1),
             Qt.SmoothTransformation
@@ -113,16 +115,16 @@ class ImageCanvas(QWidget):
             # Button-based zoom or no animation - zoom from center
             if animate:
                 self.zoom_animation.stop()
-                self.zoom_animation.setStartValue(self.zoom_factor)
+                self.zoom_animation.setStartValue(self._zoom_factor)
                 self.zoom_animation.setEndValue(new_zoom)
                 self.zoom_animation.start()
             else:
-                self.zoomFactor = new_zoom
+                self.zoom_factor = new_zoom
             return
         
         # Mouse wheel zoom - zoom from mouse position
         # Calculate the position of the mouse in the image before zoom
-        old_zoom = self.zoom_factor
+        old_zoom = self._zoom_factor
         
         # Stop any ongoing animations
         self.zoom_animation.stop()
@@ -139,18 +141,18 @@ class ImageCanvas(QWidget):
         
         # Calculate new pan offset
         zoom_ratio = new_zoom / old_zoom
-        new_pan_x = self.pan_offset.x() * zoom_ratio + offset_x_canvas * (zoom_ratio - 1)
-        new_pan_y = self.pan_offset.y() * zoom_ratio + offset_y_canvas * (zoom_ratio - 1)
+        new_pan_x = self._pan_offset_x * zoom_ratio + offset_x_canvas * (zoom_ratio - 1)
+        new_pan_y = self._pan_offset_y * zoom_ratio + offset_y_canvas * (zoom_ratio - 1)
         
         # Animate zoom
-        self.zoom_animation.setStartValue(self.zoom_factor)
+        self.zoom_animation.setStartValue(self._zoom_factor)
         self.zoom_animation.setEndValue(new_zoom)
         
         # Animate pan offset
-        self.pan_animation_x.setStartValue(self.pan_offset.x())
+        self.pan_animation_x.setStartValue(self._pan_offset_x)
         self.pan_animation_x.setEndValue(int(new_pan_x))
         
-        self.pan_animation_y.setStartValue(self.pan_offset.y())
+        self.pan_animation_y.setStartValue(self._pan_offset_y)
         self.pan_animation_y.setEndValue(int(new_pan_y))
         
         self.zoom_animation.start()
@@ -159,11 +161,11 @@ class ImageCanvas(QWidget):
 
     def zoom_in(self, animate=True):
         """Zoom in by 20% from center"""
-        self.set_zoom(self.zoom_factor * 1.2, animate=animate)
+        self.set_zoom(self._zoom_factor * 1.2, animate=animate)
 
     def zoom_out(self, animate=True):
         """Zoom out by 20% from center"""
-        self.set_zoom(self.zoom_factor / 1.2, animate=animate)
+        self.set_zoom(self._zoom_factor / 1.2, animate=animate)
 
     def rotate(self, angle):
         """Rotate image by angle degrees"""
@@ -190,13 +192,13 @@ class ImageCanvas(QWidget):
             self.pan_animation_x.stop()
             self.pan_animation_y.stop()
             
-            self.zoom_animation.setStartValue(self.zoom_factor)
+            self.zoom_animation.setStartValue(self._zoom_factor)
             self.zoom_animation.setEndValue(new_zoom)
             
-            self.pan_animation_x.setStartValue(self.pan_offset.x())
+            self.pan_animation_x.setStartValue(self._pan_offset_x)
             self.pan_animation_x.setEndValue(0)
             
-            self.pan_animation_y.setStartValue(self.pan_offset.y())
+            self.pan_animation_y.setStartValue(self._pan_offset_y)
             self.pan_animation_y.setEndValue(0)
             
             self.zoom_animation.start()
@@ -204,6 +206,8 @@ class ImageCanvas(QWidget):
             self.pan_animation_y.start()
         else:
             self.zoom_factor = new_zoom
+            self._pan_offset_x = 0
+            self._pan_offset_y = 0
             self.pan_offset = QPoint(0, 0)
             self.update_transformed_pixmap()
             self.update()
@@ -229,13 +233,14 @@ class ImageCanvas(QWidget):
 
         if self.transformed_pixmap:
             # Calculate position to center the image
-            x = (self.width() - self.transformed_pixmap.width()) // 2 + self.pan_offset.x()
-            y = (self.height() - self.transformed_pixmap.height()) // 2 + self.pan_offset.y()
+            x = (self.width() - self.transformed_pixmap.width()) // 2 + self._pan_offset_x
+            y = (self.height() - self.transformed_pixmap.height()) // 2 + self._pan_offset_y
             painter.drawPixmap(x, y, self.transformed_pixmap)
 
     def wheelEvent(self, event):
         """Handle mouse wheel for zooming with mouse position"""
-        self.last_mouse_pos = event.pos()
+        # Get mouse position from event
+        self.last_mouse_pos = event.position()
         
         if event.angleDelta().y() > 0:
             self.zoom_in(animate=True)
@@ -246,7 +251,7 @@ class ImageCanvas(QWidget):
 
     def mousePressEvent(self, event):
         """Handle mouse press for panning"""
-        if event.button() == Qt.LeftButton and self.zoom_factor > 1.0:
+        if event.button() == Qt.LeftButton and self._zoom_factor > 1.0:
             self.is_panning = True
             self.pan_start = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -256,6 +261,8 @@ class ImageCanvas(QWidget):
         if self.is_panning:
             delta = event.pos() - self.pan_start
             self.pan_offset += delta
+            self._pan_offset_x = self.pan_offset.x()
+            self._pan_offset_y = self.pan_offset.y()
             self.pan_start = event.pos()
             self.update()
 

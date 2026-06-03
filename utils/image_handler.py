@@ -1,6 +1,6 @@
 """Image handling utilities"""
 from pathlib import Path
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage
 from utils.constants import SUPPORTED_FORMATS
 import logging
 
@@ -19,6 +19,19 @@ class ImageHandler:
                 logger.error(f"Failed to load image: {file_path}")
                 return None
             return pixmap
+        except Exception as e:
+            logger.exception(f"Error loading image: {file_path}")
+            return None
+
+    @staticmethod
+    def load_image_as_qimage(file_path):
+        """Load image as QImage to get format information"""
+        try:
+            image = QImage(file_path)
+            if image.isNull():
+                logger.error(f"Failed to load image: {file_path}")
+                return None
+            return image
         except Exception as e:
             logger.exception(f"Error loading image: {file_path}")
             return None

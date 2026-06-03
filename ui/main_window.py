@@ -1,7 +1,7 @@
 """Main window for the image viewer application"""
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar
+    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar, QMessageBox
 )
 from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence
 from PySide6.QtCore import Qt, QSize, QTimer
@@ -114,13 +114,13 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
 
         rotate_left_action = QAction("Rotate Left", self)
-        rotate_left_action.setShortcut("Left")
+        rotate_left_action.setShortcut("Home")
         rotate_left_action.setStatusTip("Rotate image left")
         rotate_left_action.triggered.connect(self.rotate_left)
         view_menu.addAction(rotate_left_action)
 
         rotate_right_action = QAction("Rotate Right", self)
-        rotate_right_action.setShortcut("Right")
+        rotate_right_action.setShortcut("End")
         rotate_right_action.setStatusTip("Rotate image right")
         rotate_right_action.triggered.connect(self.rotate_right)
         view_menu.addAction(rotate_right_action)
@@ -141,14 +141,14 @@ class MainWindow(QMainWindow):
 
         # Navigation buttons
         prev_action = QAction("Previous", self)
-        prev_action.setShortcut("Up")
-        prev_action.setStatusTip("Previous image")
+        prev_action.setShortcut("Page_Up")
+        prev_action.setStatusTip("Previous image (Page Up)")
         prev_action.triggered.connect(self.previous_image)
         toolbar.addAction(prev_action)
 
         next_action = QAction("Next", self)
-        next_action.setShortcut("Down")
-        next_action.setStatusTip("Next image")
+        next_action.setShortcut("Page_Down")
+        next_action.setStatusTip("Next image (Page Down)")
         next_action.triggered.connect(self.next_image)
         toolbar.addAction(next_action)
 
@@ -189,6 +189,17 @@ class MainWindow(QMainWindow):
         )
 
         if file_path:
+            # When opening a single file, create a list with just that file
+            folder_path = str(Path(file_path).parent)
+            self.image_list = self.image_handler.get_images_from_folder(folder_path)
+            
+            # Find the current file index
+            if self.image_list and file_path in self.image_list:
+                self.current_index = self.image_list.index(file_path)
+            else:
+                self.image_list = [file_path]
+                self.current_index = 0
+            
             self.load_image(file_path)
 
     def open_folder(self):
@@ -223,6 +234,16 @@ class MainWindow(QMainWindow):
 
     def open_dropped_file(self, file_path):
         """Handle dropped file"""
+        # When a file is dropped, treat it like opening a single file
+        folder_path = str(Path(file_path).parent)
+        self.image_list = self.image_handler.get_images_from_folder(folder_path)
+        
+        if self.image_list and file_path in self.image_list:
+            self.current_index = self.image_list.index(file_path)
+        else:
+            self.image_list = [file_path]
+            self.current_index = 0
+        
         self.load_image(file_path)
 
     def copy_image(self):
@@ -257,15 +278,27 @@ class MainWindow(QMainWindow):
 
     def previous_image(self):
         """Show previous image"""
-        if self.image_list and self.current_index > 0:
+        if not self.image_list:
+            self.status_label.setText("No images loaded")
+            return
+        
+        if self.current_index > 0:
             self.current_index -= 1
             self.load_image(self.image_list[self.current_index])
+        else:
+            self.status_label.setText("Already at the first image")
 
     def next_image(self):
         """Show next image"""
-        if self.image_list and self.current_index < len(self.image_list) - 1:
+        if not self.image_list:
+            self.status_label.setText("No images loaded")
+            return
+        
+        if self.current_index < len(self.image_list) - 1:
             self.current_index += 1
             self.load_image(self.image_list[self.current_index])
+        else:
+            self.status_label.setText("Already at the last image")
 
     def update_status(self):
         """Update status bar information"""
@@ -279,7 +312,6 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         """Show about dialog"""
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.about(
             self,
             "About SimImageView",

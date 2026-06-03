@@ -1,8 +1,7 @@
 """Image viewer widget for displaying and manipulating images"""
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QApplication
 from PySide6.QtGui import QPixmap, QPainter, QTransform
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QRect
-from PySide6.QtGui import QApplication
 import logging
 
 logger = logging.getLogger(__name__)

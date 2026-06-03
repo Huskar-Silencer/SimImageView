@@ -1,18 +1,117 @@
 """Main window for the image viewer application"""
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar, QMessageBox
+    QMenuBar, QToolBar, QStatusBar, QFileDialog, QProgressBar, QMessageBox, QDialog
 )
 from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence
 from PySide6.QtCore import Qt, QSize, QTimer
 from pathlib import Path
 import logging
+import os
 
 from ui.image_viewer import ImageViewerWidget
 from utils.image_handler import ImageHandler
 from utils.constants import APP_TITLE, APP_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+class ImagePropertiesDialog(QDialog):
+    """Dialog to display image properties"""
+    
+    def __init__(self, parent, file_path, pixmap):
+        super().__init__(parent)
+        self.setWindowTitle("Image Properties")
+        self.setGeometry(100, 100, 400, 300)
+        self.setup_ui(file_path, pixmap)
+    
+    def setup_ui(self, file_path, pixmap):
+        """Setup the dialog UI"""
+        layout = QVBoxLayout(self)
+        
+        # Get file information
+        file_path = Path(file_path)
+        file_size = file_path.stat().st_size
+        file_size_str = self.format_file_size(file_size)
+        
+        # Get image information
+        img_width = pixmap.width()
+        img_height = pixmap.height()
+        img_format = pixmap.format()
+        
+        # Create labels
+        properties = [
+            ("File Name:", file_path.name),
+            ("File Path:", str(file_path)),
+            ("File Size:", file_size_str),
+            ("Image Width:", f"{img_width} px"),
+            ("Image Height:", f"{img_height} px"),
+            ("Dimensions:", f"{img_width} × {img_height}"),
+            ("Format:", self.format_to_string(img_format)),
+            ("File Type:", file_path.suffix.upper()),
+        ]
+        
+        for label_text, value_text in properties:
+            row_layout = QHBoxLayout()
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold; min-width: 100px;")
+            value = QLabel(value_text)
+            value.setWordWrap(True)
+            row_layout.addWidget(label)
+            row_layout.addWidget(value)
+            layout.addLayout(row_layout)
+        
+        layout.addStretch()
+        
+        # Close button
+        close_button = self.buttonBox = QMessageBox()
+        close_button = QMessageBox()
+    
+    @staticmethod
+    def format_file_size(size_bytes):
+        """Format file size to human readable format"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.2f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.2f} TB"
+    
+    @staticmethod
+    def format_to_string(img_format):
+        """Convert QImage format to string"""
+        format_map = {
+            0: "Invalid",
+            1: "Mono",
+            2: "MonoLSB",
+            3: "Indexed8",
+            4: "RGB32",
+            5: "ARGB32",
+            6: "ARGB32_Premultiplied",
+            7: "RGB16",
+            8: "ARGB8565_Premultiplied",
+            9: "RGB666",
+            10: "ARGB6666_Premultiplied",
+            11: "RGB555",
+            12: "ARGB8555_Premultiplied",
+            13: "RGB888",
+            14: "RGB444",
+            15: "ARGB4444_Premultiplied",
+            16: "RGBX8888",
+            17: "RGBA8888",
+            18: "RGBA8888_Premultiplied",
+            19: "BGR30",
+            20: "A2BGR30_Premultiplied",
+            21: "RGB30",
+            22: "A2RGB30_Premultiplied",
+            23: "Alpha8",
+            24: "Grayscale8",
+            25: "RGBX64",
+            26: "RGBA64",
+            27: "RGBA64_Premultiplied",
+            28: "Grayscale16",
+            29: "BGR888",
+        }
+        return format_map.get(int(img_format), "Unknown")
 
 
 class MainWindow(QMainWindow):
@@ -22,6 +121,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.image_handler = ImageHandler()
         self.current_file = None
+        self.current_pixmap = None
         self.image_list = []
         self.current_index = 0
 
@@ -125,6 +225,14 @@ class MainWindow(QMainWindow):
         rotate_right_action.triggered.connect(self.rotate_right)
         view_menu.addAction(rotate_right_action)
 
+        view_menu.addSeparator()
+
+        properties_action = QAction("Image Properties", self)
+        properties_action.setShortcut("Ctrl+I")
+        properties_action.setStatusTip("Show image properties")
+        properties_action.triggered.connect(self.show_properties)
+        view_menu.addAction(properties_action)
+
         # Help menu
         help_menu = menubar.addMenu("Help")
 
@@ -166,6 +274,15 @@ class MainWindow(QMainWindow):
         fit_window_action = QAction("Fit Window", self)
         fit_window_action.triggered.connect(self.fit_to_window)
         toolbar.addAction(fit_window_action)
+
+        toolbar.addSeparator()
+
+        # Properties button
+        properties_action = QAction("Properties", self)
+        properties_action.setShortcut("Ctrl+I")
+        properties_action.setStatusTip("Show image properties (Ctrl+I)")
+        properties_action.triggered.connect(self.show_properties)
+        toolbar.addAction(properties_action)
 
     def setup_status_bar(self):
         """Create status bar"""
@@ -225,6 +342,7 @@ class MainWindow(QMainWindow):
             if pixmap:
                 self.image_viewer.set_image(pixmap)
                 self.current_file = file_path
+                self.current_pixmap = pixmap
                 self.update_status()
             else:
                 self.status_label.setText(f"Failed to load image: {file_path}")
@@ -310,6 +428,15 @@ class MainWindow(QMainWindow):
                 info = file_name
             self.info_label.setText(info)
 
+    def show_properties(self):
+        """Show image properties dialog"""
+        if not self.current_file or not self.current_pixmap:
+            QMessageBox.warning(self, "Warning", "No image loaded")
+            return
+        
+        dialog = ImagePropertiesDialog(self, self.current_file, self.current_pixmap)
+        dialog.exec()
+
     def show_about(self):
         """Show about dialog"""
         QMessageBox.about(
@@ -336,5 +463,8 @@ class MainWindow(QMainWindow):
             QStatusBar {
                 background-color: #ffffff;
                 border-top: 1px solid #e0e0e0;
+            }
+            QDialog {
+                background-color: #f5f5f5;
             }
         """

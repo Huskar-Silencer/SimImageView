@@ -91,7 +91,7 @@ class ImageCanvas(GraphView):
     def scale_factor(self) -> float:
         return self._scale_factor
 
-    def has_image(self) -> bool:
+    def exist_image(self) -> bool:
         return not self._pixmap_item.pixmap().isNull()
 
     def load_image(self, image_path: Path) -> bool:
@@ -122,7 +122,7 @@ class ImageCanvas(GraphView):
             return False
 
         pixmap = QPixmap.fromImage(image)
-        if not self.has_image():
+        if not self.exist_image():
             self._image_path = image_path
             self._set_centered_pixmap(self._pixmap_item, pixmap)
             self._pixmap_item.setOpacity(1.0)
@@ -217,7 +217,7 @@ class ImageCanvas(GraphView):
         self.set_zoom(self._scale_factor / 1.25)
 
     def set_zoom(self, scale_factor: float) -> None:
-        if not self.has_image():
+        if not self.exist_image():
             return
 
         new_scale = max(0.05, min(scale_factor, 20.0))
@@ -226,7 +226,7 @@ class ImageCanvas(GraphView):
         self._rebuild_transform()
 
     def fit_to_window(self) -> None:
-        if not self.has_image():
+        if not self.exist_image():
             return
 
         self._fit_mode = True
@@ -249,13 +249,13 @@ class ImageCanvas(GraphView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._fit_mode and self.has_image():
+        if self._fit_mode and self.exist_image():
             self.fit_to_window()
-        if not self.has_image():
+        if not self.exist_image():
             self._update_empty_state()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if not self.has_image():
+        if not self.exist_image():
             super().wheelEvent(event)
             return
 
@@ -335,7 +335,7 @@ class ImageCanvas(GraphView):
         super().dropEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton and self.has_image():
+        if event.button() == Qt.LeftButton and self.exist_image():
             self._panning = True
             self._last_mouse_pos = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -392,7 +392,7 @@ class ImageCanvas(GraphView):
         item.setOffset(-pixmap.width() / 2, -pixmap.height() / 2)
 
     def _adjust_initial_view(self) -> None:
-        if not self.has_image():
+        if not self.exist_image():
             return
         viewport_size = self.viewport().size()
         pixmap_size = self._pixmap_item.pixmap().size()
@@ -421,7 +421,7 @@ class ImageCanvas(GraphView):
         self._empty_state_item.setOffset(-pixmap.width() / 2, -pixmap.height() / 2)
 
     def _update_empty_state(self) -> None:
-        if self.has_image():
+        if self.exist_image():
             self._empty_state_item.setVisible(False)
             return
 

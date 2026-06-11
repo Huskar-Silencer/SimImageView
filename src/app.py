@@ -888,7 +888,7 @@ class ImageViewMainWindow(QMainWindow):
             self._show_image_at_index(row)
 
     def _update_status(self) -> None:
-        if not self.canvas.has_image() or self.current_index < 0:
+        if not self.canvas.exist_image() or self.current_index < 0:
             self.info_label.setText("")
             return
 
@@ -980,7 +980,7 @@ def create_app() -> QApplication:
     if app is None:
         app = QApplication([])
 
-    app.setApplicationName("PySide6 Image Viewer")
-    app.setOrganizationName("Trae")
+    app.setApplicationName("SimImageView")
+    app.setOrganizationName("E_Chronosands")
     app.setStyle("Fusion")
     return app

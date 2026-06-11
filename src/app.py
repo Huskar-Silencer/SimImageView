@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 
 from PySide6.QtCore import (
     QObject,
@@ -45,7 +46,6 @@ from PySide6.QtWidgets import (
 )
 
 from canvas import ImageCanvas
-
 
 SUPPORTED_SUFFIXES = {
     ".bmp",
@@ -169,9 +169,69 @@ class ThumbnailDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-class MainWindow(QMainWindow):
+class ImageViewMainWindow(QMainWindow):
+
+    DEFAULT_SLICESHOW_INTERVAL_MS = 3000
+
     def __init__(self) -> None:
         super().__init__()
+        self._init_window_base_value()
+        self._init_window_thumbnail()
+        self._init_window_sliceshow()
+        self._init_window_label()
+        self._init_window_status_bar()
+        self._init_window_action()
+
+    def _open_file(self) -> None:
+        filters = self._build_file_dialog_filter()
+        start_dir = str(self.current_dir or Path.home())
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Image",
+            start_dir,
+            filters,
+        )
+        if not file_path:
+            return
+        self.load_from_path(Path(file_path))
+
+    def _open_dir(self) -> None:
+        default_dir_path = str(self.current_dir or Path.home())
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "Select Image Folder", default_dir_path
+        )
+        if not dir_path:
+            return
+        image_path_list = self._collect_image_list(Path(dir_path))
+        self._set_image_list(image_path_list, 0)
+
+    def load_from_path(self, path: Path) -> None:
+        if not path.exists():
+            QMessageBox.warning(self, "File Not Found", f"Cannot find file:\n{path}")
+            return
+        if path.is_file():
+            parent_dir = path.parent
+            image_path_list = self._collect_image_list(parent_dir)
+            self._set_image_list(image_path_list, image_path_list.index(path))
+        else:
+            image_path_list = self._collect_image_list(path)
+            self._set_image_list(image_path_list, 0)
+
+    def show_previous_image(self) -> None:
+        if self.current_index > 0:
+            self._show_image_at_index(self.current_index - 1)
+
+    def show_next_image(self) -> None:
+        if 0 <= self.current_index < len(self.image_path_list) - 1:
+            self._show_image_at_index(self.current_index + 1)
+
+    def toggle_fullscreen(self, checked: bool) -> None:
+        if checked:
+            self.showFullScreen()
+        else:
+            self.showNormal()
+
+    def _init_window_base_value(self: ImageViewMainWindow):
         self.setWindowTitle("PySide6 Image Viewer")
         self.resize(1400, 900)
         self.setAcceptDrops(True)
@@ -185,10 +245,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.canvas)
         self.canvas.path_dropped.connect(self.load_from_path)
 
-        self.image_paths: list[Path] = []
+        self.image_path_list: list[Path] = []
         self.current_index = -1
         self.current_dir: Path | None = None
 
+    def _init_window_thumbnail(self: ImageViewMainWindow):
         self.thumbnail_icon_size = QSize(120, 120)
         self.thumbnail_grid_size = QSize(160, 170)
 
@@ -197,7 +258,9 @@ class MainWindow(QMainWindow):
         self.thumbnail_list.setIconSize(self.thumbnail_icon_size)
         self.thumbnail_list.setGridSize(self.thumbnail_grid_size)
         self.thumbnail_list.setItemDelegate(
-            ThumbnailDelegate(self.thumbnail_icon_size, self.thumbnail_grid_size, self.thumbnail_list)
+            ThumbnailDelegate(
+                self.thumbnail_icon_size, self.thumbnail_grid_size, self.thumbnail_list
+            )
         )
         self.thumbnail_list.setResizeMode(QListWidget.Adjust)
         self.thumbnail_list.setMovement(QListWidget.Static)
@@ -209,7 +272,9 @@ class MainWindow(QMainWindow):
         self.thumbnail_list.currentRowChanged.connect(self._on_thumbnail_selected)
 
         self.thumbnail_dock = QDockWidget("Thumbnails", self)
-        self.thumbnail_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.thumbnail_dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea
+        )
         self.thumbnail_dock.setMinimumWidth(220)
         self.thumbnail_dock.setMaximumWidth(520)
         self.thumbnail_dock.setWidget(self.thumbnail_list)
@@ -242,23 +307,26 @@ class MainWindow(QMainWindow):
             self._on_thumbnail_scrolled
         )
 
-        self._slideshow_interval_ms = 3000
+    def _init_window_sliceshow(self: ImageViewMainWindow):
+        self._slideshow_interval_ms = ImageViewMainWindow.DEFAULT_SLICESHOW_INTERVAL_MS
         self._slideshow_timer = QTimer(self)
         self._slideshow_timer.timeout.connect(self._slideshow_next)
 
-        self.path_label = QLabel("No image opened")
-        self.path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.info_label = QLabel("")
-
+    def _init_window_status_bar(self: ImageViewMainWindow):
         status_bar = QStatusBar(self)
         status_bar.addWidget(self.path_label, 1)
         status_bar.addPermanentWidget(self.info_label)
         self.setStatusBar(status_bar)
 
+    def _init_window_label(self: ImageViewMainWindow):
+        self.path_label = QLabel("No image opened")
+        self.path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.info_label = QLabel("")
+
+    def _init_window_action(self: ImageViewMainWindow):
         self._create_actions()
         self._create_menus()
         self._create_toolbar()
-
         self.canvas.zoom_changed.connect(self._update_status)
         self.set_theme(self._theme)
         self._update_actions()
@@ -272,11 +340,11 @@ class MainWindow(QMainWindow):
             self,
         )
         self.open_file_action.setShortcut(QKeySequence.Open)
-        self.open_file_action.triggered.connect(self.open_file)
+        self.open_file_action.triggered.connect(self._open_file)
 
         self.open_folder_action = QAction("Open Folder", self)
         self.open_folder_action.setShortcut("Ctrl+Shift+O")
-        self.open_folder_action.triggered.connect(self.open_folder)
+        self.open_folder_action.triggered.connect(self._open_dir)
 
         self.exit_action = QAction("Exit", self)
         self.exit_action.setShortcut(QKeySequence.Quit)
@@ -366,6 +434,10 @@ class MainWindow(QMainWindow):
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about_dialog)
 
+        self.image_info_action = QAction("Image Info", self)
+        self.image_info_action.setShortcut("Ctrl+I")
+        self.image_info_action.triggered.connect(self.show_image_info_dialog)
+
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(self.open_file_action)
@@ -389,6 +461,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.slideshow_action)
         view_menu.addAction(self.slideshow_interval_action)
         view_menu.addAction(self.fullscreen_action)
+        view_menu.addAction(self.image_info_action)
 
         theme_menu = view_menu.addMenu("Theme")
         theme_menu.addAction(self.light_theme_action)
@@ -422,77 +495,11 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.theme_toggle_action)
         toolbar.addAction(self.about_action)
-
-    def open_file(self) -> None:
-        filters = self._build_file_dialog_filter()
-        start_dir = str(self.current_dir or Path.home())
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Image",
-            start_dir,
-            filters,
-        )
-        if file_path:
-            self.load_from_path(Path(file_path))
-
-    def open_folder(self) -> None:
-        start_dir = str(self.current_dir or Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "Select Image Folder", start_dir)
-        if not folder:
-            return
-
-        directory = Path(folder)
-        image_paths = self._collect_images(directory)
-        if not image_paths:
-            QMessageBox.information(
-                self,
-                "No Images",
-                "No supported image files were found in this folder.",
-            )
-            return
-
-        self._set_image_list(image_paths, 0)
-
-    def load_from_path(self, path: Path) -> None:
-        if path.is_dir():
-            image_paths = self._collect_images(path)
-            if image_paths:
-                self._set_image_list(image_paths, 0)
-            else:
-                QMessageBox.information(
-                    self,
-                    "No Images",
-                    "No supported image files were found in this folder.",
-                )
-            return
-
-        if not path.exists():
-            QMessageBox.warning(self, "File Not Found", f"Cannot find file:\n{path}")
-            return
-
-        siblings = self._collect_images(path.parent)
-        if path in siblings:
-            self._set_image_list(siblings, siblings.index(path))
-        else:
-            self._set_image_list([path], 0)
-
-    def show_previous_image(self) -> None:
-        if self.current_index > 0:
-            self._show_image_at_index(self.current_index - 1)
-
-    def show_next_image(self) -> None:
-        if 0 <= self.current_index < len(self.image_paths) - 1:
-            self._show_image_at_index(self.current_index + 1)
-
-    def toggle_fullscreen(self, checked: bool) -> None:
-        if checked:
-            self.showFullScreen()
-        else:
-            self.showNormal()
+        toolbar.addAction(self.image_info_action)
 
     def _toggle_slideshow(self, enabled: bool) -> None:
         if enabled:
-            if not self.image_paths:
+            if not self.image_path_list:
                 self.slideshow_action.setChecked(False)
                 return
             self._slideshow_timer.start(self._slideshow_interval_ms)
@@ -533,15 +540,13 @@ class MainWindow(QMainWindow):
         if app is not None:
             if normalized_theme == "dark":
                 app.setPalette(self._dark_palette)
-                app.setStyleSheet(
-                    """
+                app.setStyleSheet("""
                     QToolTip {
                         color: #f5f5f5;
                         background-color: #2b2b2b;
                         border: 1px solid #575757;
                     }
-                    """
-                )
+                    """)
             else:
                 app.setPalette(self._light_palette)
                 app.setStyleSheet("")
@@ -594,7 +599,7 @@ class MainWindow(QMainWindow):
         )
 
     def _slideshow_next(self) -> None:
-        if not self.image_paths:
+        if not self.image_path_list:
             self.slideshow_action.setChecked(False)
             return
 
@@ -603,7 +608,7 @@ class MainWindow(QMainWindow):
             return
 
         next_index = self.current_index + 1
-        if next_index >= len(self.image_paths):
+        if next_index >= len(self.image_path_list):
             next_index = 0
         self._show_image_at_index(next_index, animated=True)
 
@@ -651,10 +656,9 @@ class MainWindow(QMainWindow):
         suffixes = " ".join(f"*{suffix}" for suffix in sorted(SUPPORTED_SUFFIXES))
         return f"Images ({suffixes});;All Files (*)"
 
-    def _collect_images(self, directory: Path) -> list[Path]:
+    def _collect_image_list(self, directory: Path) -> list[Path]:
         if not directory.exists():
             return []
-
         files = [
             path
             for path in directory.iterdir()
@@ -663,7 +667,7 @@ class MainWindow(QMainWindow):
         return sorted(files, key=lambda item: item.name.lower())
 
     def _set_image_list(self, image_paths: list[Path], index: int) -> None:
-        self.image_paths = image_paths
+        self.image_path_list = image_paths
         self.current_dir = image_paths[0].parent if image_paths else None
         self._thumbnail_token += 1
         self._thumbnail_pending.clear()
@@ -676,7 +680,7 @@ class MainWindow(QMainWindow):
         self._populate_thumbnails()
         self._show_image_at_index(index)
 
-        if not self.image_paths and self.slideshow_action.isChecked():
+        if not self.image_path_list and self.slideshow_action.isChecked():
             self.slideshow_action.setChecked(False)
 
     def _populate_thumbnails(self) -> None:
@@ -695,10 +699,12 @@ class MainWindow(QMainWindow):
         batch_size = 250
         placeholder_icon = self.style().standardIcon(QStyle.SP_FileIcon)
 
-        end = min(len(self.image_paths), self._thumbnail_populate_index + batch_size)
+        end = min(
+            len(self.image_path_list), self._thumbnail_populate_index + batch_size
+        )
         self.thumbnail_list.blockSignals(True)
         for i in range(self._thumbnail_populate_index, end):
-            image_path = self.image_paths[i]
+            image_path = self.image_path_list[i]
             item = QListWidgetItem(image_path.name)
             cached = self._thumbnail_cache.get(image_path)
             if isinstance(cached, QPixmap) and not cached.isNull():
@@ -716,7 +722,7 @@ class MainWindow(QMainWindow):
             self.thumbnail_list.blockSignals(False)
 
         self._thumbnail_populate_index = end
-        if end < len(self.image_paths):
+        if end < len(self.image_path_list):
             QTimer.singleShot(0, self._populate_thumbnails_step)
             return
 
@@ -741,9 +747,9 @@ class MainWindow(QMainWindow):
     def _queue_thumbnail_task(self, token: int, index: int) -> None:
         if index in self._thumbnail_pending:
             return
-        if not (0 <= index < len(self.image_paths)):
+        if not (0 <= index < len(self.image_path_list)):
             return
-        image_path = self.image_paths[index]
+        image_path = self.image_path_list[index]
         cached = self._thumbnail_cache.get(image_path)
         if isinstance(cached, QPixmap) and not cached.isNull():
             return
@@ -758,9 +764,9 @@ class MainWindow(QMainWindow):
         self._thumbnail_pool.start(task)
 
     def _priority_indices_around(self, center: int, radius: int) -> list[int]:
-        if not self.image_paths:
+        if not self.image_path_list:
             return []
-        max_index = len(self.image_paths) - 1
+        max_index = len(self.image_path_list) - 1
         c = min(max(center, 0), max_index)
         r = max(0, radius)
         result: list[int] = []
@@ -775,10 +781,12 @@ class MainWindow(QMainWindow):
 
     def _ensure_thumbnail_window(self, center: int, restart_deferred: bool) -> None:
         token = self._thumbnail_token
-        if not self.image_paths:
+        if not self.image_path_list:
             return
 
-        for index in self._priority_indices_around(center, self._thumbnail_priority_radius):
+        for index in self._priority_indices_around(
+            center, self._thumbnail_priority_radius
+        ):
             self._queue_thumbnail_task(token, index)
 
         if restart_deferred:
@@ -789,7 +797,7 @@ class MainWindow(QMainWindow):
         if self._thumbnail_deferred_token != token:
             self._thumbnail_deferred_token = token
 
-        max_index = len(self.image_paths) - 1
+        max_index = len(self.image_path_list) - 1
         c = min(max(center, 0), max_index)
         order: list[int] = []
         for d in range(self._thumbnail_priority_radius + 1, max_index + 1):
@@ -838,7 +846,9 @@ class MainWindow(QMainWindow):
         item = self.thumbnail_list.item(index)
         if item is None:
             return
-        path = self.image_paths[index] if index < len(self.image_paths) else None
+        path = (
+            self.image_path_list[index] if index < len(self.image_path_list) else None
+        )
         if isinstance(path, Path):
             self._thumbnail_cache[path] = pixmap
         item.setData(Qt.UserRole, pixmap)
@@ -846,19 +856,19 @@ class MainWindow(QMainWindow):
         self.thumbnail_list.viewport().update()
 
     def _show_image_at_index(self, index: int, animated: bool = False) -> None:
-        if not (0 <= index < len(self.image_paths)):
+        if not (0 <= index < len(self.image_path_list)):
             return
-
-        image_path = self.image_paths[index]
+        image_path = self.image_path_list[index]
         ok = (
             self.canvas.transition_to_image(image_path)
             if animated
             else self.canvas.load_image(image_path)
         )
         if not ok:
-            QMessageBox.warning(self, "Open Failed", f"Unable to read image:\n{image_path}")
+            QMessageBox.warning(
+                self, "Open Failed", f"Unable to read image:\n{image_path}"
+            )
             return
-
         self.current_index = index
         if index < self.thumbnail_list.count():
             self.thumbnail_list.blockSignals(True)
@@ -882,23 +892,23 @@ class MainWindow(QMainWindow):
             self.info_label.setText("")
             return
 
-        path = self.image_paths[self.current_index]
+        path = self.image_path_list[self.current_index]
         reader = QImageReader(str(path))
         size = reader.size()
         zoom_percent = int(round(self.canvas.scale_factor * 100))
         self.info_label.setText(
-            f"{self.current_index + 1}/{len(self.image_paths)} | "
+            f"{self.current_index + 1}/{len(self.image_path_list)} | "
             f"{size.width()}x{size.height()} | "
             f"{zoom_percent}%"
         )
 
     def _update_actions(self) -> None:
-        has_images = bool(self.image_paths)
+        has_images = bool(self.image_path_list)
         has_current = self.current_index >= 0
 
         self.prev_action.setEnabled(has_current and self.current_index > 0)
         self.next_action.setEnabled(
-            has_current and self.current_index < len(self.image_paths) - 1
+            has_current and self.current_index < len(self.image_path_list) - 1
         )
         self.slideshow_action.setEnabled(has_images)
         self.slideshow_interval_action.setEnabled(True)
@@ -911,8 +921,58 @@ class MainWindow(QMainWindow):
             self.rotate_left_action,
             self.rotate_right_action,
             self.fullscreen_action,
+            self.image_info_action,
         ):
             action.setEnabled(has_images)
+
+    def show_image_info_dialog(self) -> None:
+        if not (0 <= self.current_index < len(self.image_path_list)):
+            return
+        current_image_path = self.image_path_list[self.current_index]
+        reader = QImageReader(str(current_image_path))
+        size = reader.size()
+        file_format = (
+            bytes(reader.format()).decode("ascii", errors="ignore").upper()
+            if reader.format()
+            else current_image_path.suffix.lstrip(".").upper()
+        )
+        try:
+            stat = current_image_path.stat()
+            file_size_text = self._format_file_size(stat.st_size)
+            modified_text = datetime.fromtimestamp(stat.st_mtime).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        except OSError:
+            file_size_text = "Unknown"
+            modified_text = "Unknown"
+
+        dimensions_text = (
+            f"{size.width()} x {size.height()} px" if size.isValid() else "Unknown"
+        )
+
+        QMessageBox.information(
+            self,
+            "Image Info",
+            (
+                f"Name: {current_image_path.name}\n"
+                f"Location: {current_image_path}\n"
+                f"Format: {file_format or 'Unknown'}\n"
+                f"Dimensions: {dimensions_text}\n"
+                f"File Size: {file_size_text}\n"
+                f"Modified: {modified_text}"
+            ),
+        )
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        value = float(max(0, size_bytes))
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_index = 0
+        while value >= 1024.0 and unit_index < len(units) - 1:
+            value /= 1024.0
+            unit_index += 1
+        if unit_index == 0:
+            return f"{int(value)} {units[unit_index]}"
+        return f"{value:.2f} {units[unit_index]}"
 
 
 def create_app() -> QApplication:

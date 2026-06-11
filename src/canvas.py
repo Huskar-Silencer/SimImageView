@@ -3,7 +3,15 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QRectF, Qt, Signal, QVariantAnimation
+from PySide6.QtCore import (
+    QEvent,
+    QEasingCurve,
+    QPoint,
+    QRectF,
+    Qt,
+    Signal,
+    QVariantAnimation,
+)
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -46,7 +54,9 @@ class ImageCanvas(GraphView):
         self._empty_state_item = QGraphicsPixmapItem()
         self._empty_state_item.setOpacity(0.25)
         self._empty_state_item.setAcceptedMouseButtons(Qt.NoButton)
-        self._empty_state_item.setFlag(QGraphicsPixmapItem.ItemIgnoresTransformations, True)
+        self._empty_state_item.setFlag(
+            QGraphicsPixmapItem.ItemIgnoresTransformations, True
+        )
         self._scene.addItem(self._empty_state_item)
         self.setScene(self._scene)
 
@@ -100,7 +110,7 @@ class ImageCanvas(GraphView):
         self._scale_factor = 1.0
         self.resetTransform()
         self._apply_rotation()
-        self._set_initial_view()
+        self._adjust_initial_view()
         self._update_empty_state()
         return True
 
@@ -121,7 +131,7 @@ class ImageCanvas(GraphView):
             self._scale_factor = 1.0
             self.resetTransform()
             self._apply_rotation()
-            self._set_initial_view()
+            self._adjust_initial_view()
             self._update_empty_state()
             return True
 
@@ -140,11 +150,13 @@ class ImageCanvas(GraphView):
         self._set_centered_pixmap(self._pixmap_item, pixmap)
         self._pixmap_item.setOpacity(0.0)
         self._scene.setSceneRect(
-            self._pixmap_item.boundingRect().united(self._transition_item.boundingRect())
+            self._pixmap_item.boundingRect().united(
+                self._transition_item.boundingRect()
+            )
         )
         self.resetTransform()
         self._apply_rotation()
-        self._set_initial_view()
+        self._adjust_initial_view()
         self._update_empty_state()
 
         anim = QVariantAnimation(self)
@@ -379,17 +391,18 @@ class ImageCanvas(GraphView):
             return
         item.setOffset(-pixmap.width() / 2, -pixmap.height() / 2)
 
-    def _set_initial_view(self) -> None:
+    def _adjust_initial_view(self) -> None:
         if not self.has_image():
             return
-
         viewport_size = self.viewport().size()
         pixmap_size = self._pixmap_item.pixmap().size()
-        if pixmap_size.width() <= viewport_size.width() and pixmap_size.height() <= viewport_size.height():
+        if (
+            pixmap_size.width() < viewport_size.width()
+            and pixmap_size.height() < viewport_size.height()
+        ):
             self.actual_size()
-            return
-
-        self.fit_to_window()
+        else:
+            self.fit_to_window()
 
     def _init_empty_state(self) -> None:
         app = QApplication.instance()

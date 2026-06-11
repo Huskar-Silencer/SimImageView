@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPoint, QRectF, Qt, Signal, QVariantAnimation
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QRectF, Qt, Signal, QVariantAnimation
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -30,6 +30,7 @@ class ImageCanvas(GraphView):
     """Image viewport with zoom, pan and rotation support."""
 
     zoom_changed = Signal(float)
+    path_dropped = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -67,6 +68,8 @@ class ImageCanvas(GraphView):
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self._init_empty_state()
         self._update_empty_state()
 
@@ -253,6 +256,71 @@ class ImageCanvas(GraphView):
             return
 
         super().wheelEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.DragEnter:
+            mime = event.mimeData()
+            if mime is not None and mime.hasUrls():
+                for url in mime.urls():
+                    if url.isLocalFile():
+                        event.acceptProposedAction()
+                        return True
+            return super().viewportEvent(event)
+
+        if event.type() == QEvent.DragMove:
+            mime = event.mimeData()
+            if mime is not None and mime.hasUrls():
+                for url in mime.urls():
+                    if url.isLocalFile():
+                        event.acceptProposedAction()
+                        return True
+            return super().viewportEvent(event)
+
+        if event.type() == QEvent.Drop:
+            mime = event.mimeData()
+            if mime is not None and mime.hasUrls():
+                for url in mime.urls():
+                    if not url.isLocalFile():
+                        continue
+                    local_path = Path(url.toLocalFile())
+                    if local_path.exists():
+                        self.path_dropped.emit(local_path)
+                        event.acceptProposedAction()
+                        return True
+            return super().viewportEvent(event)
+
+        return super().viewportEvent(event)
+
+    def dragEnterEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    event.acceptProposedAction()
+                    return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                if not url.isLocalFile():
+                    continue
+                local_path = Path(url.toLocalFile())
+                if local_path.exists():
+                    self.path_dropped.emit(local_path)
+                    event.acceptProposedAction()
+                    return
+        super().dropEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and self.has_image():

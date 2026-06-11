@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtCore import (
+    QObject,
+    QPoint,
+    QRunnable,
+    QRect,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -52,6 +62,46 @@ SUPPORTED_SUFFIXES = {
     ".tiff",
     ".webp",
 }
+
+
+class _ThumbnailEmitter(QObject):
+    thumbnail_ready = Signal(int, int, object)
+
+
+class _ThumbnailTask(QRunnable):
+    def __init__(
+        self,
+        token: int,
+        index: int,
+        image_path: Path,
+        max_size: QSize,
+        emitter: _ThumbnailEmitter,
+    ) -> None:
+        super().__init__()
+        self._token = token
+        self._index = index
+        self._image_path = image_path
+        self._max_size = max_size
+        self._emitter = emitter
+
+    def run(self) -> None:
+        reader = QImageReader(str(self._image_path))
+        reader.setAutoTransform(True)
+        size = reader.size()
+        if size.isValid():
+            max_w = max(1, self._max_size.width())
+            max_h = max(1, self._max_size.height())
+            w = max(1, size.width())
+            h = max(1, size.height())
+            ratio = min(max_w / w, max_h / h, 1.0)
+            scaled_w = max(1, int(round(w * ratio)))
+            scaled_h = max(1, int(round(h * ratio)))
+            reader.setScaledSize(QSize(scaled_w, scaled_h))
+
+        image = reader.read()
+        if image.isNull():
+            return
+        self._emitter.thumbnail_ready.emit(self._token, self._index, image)
 
 
 class ThumbnailDelegate(QStyledItemDelegate):
@@ -133,6 +183,7 @@ class MainWindow(QMainWindow):
 
         self.canvas = ImageCanvas()
         self.setCentralWidget(self.canvas)
+        self.canvas.path_dropped.connect(self.load_from_path)
 
         self.image_paths: list[Path] = []
         self.current_index = -1
@@ -164,6 +215,32 @@ class MainWindow(QMainWindow):
         self.thumbnail_dock.setWidget(self.thumbnail_list)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.thumbnail_dock)
         self.thumbnail_dock.setVisible(False)
+
+        self._thumbnail_token = 0
+        self._thumbnail_pool = QThreadPool(self)
+        self._thumbnail_emitter = _ThumbnailEmitter(self)
+        self._thumbnail_emitter.thumbnail_ready.connect(self._on_thumbnail_ready)
+        self._thumbnail_cache: dict[Path, object] = {}
+        self._thumbnail_pending: set[int] = set()
+        self._thumbnail_priority_radius = 200
+        self._thumbnail_decode_size = QSize(
+            max(256, self.thumbnail_icon_size.width() * 2),
+            max(256, self.thumbnail_icon_size.height() * 2),
+        )
+        self._thumbnail_deferred_token = -1
+        self._thumbnail_deferred_order: list[int] = []
+        self._thumbnail_deferred_pos = 0
+        self._thumbnail_deferred_timer = QTimer(self)
+        self._thumbnail_deferred_timer.setSingleShot(True)
+        self._thumbnail_deferred_timer.timeout.connect(self._process_thumbnail_deferred)
+        self._thumbnail_populate_token = -1
+        self._thumbnail_populate_index = 0
+        self.thumbnail_dock.visibilityChanged.connect(
+            self._on_thumbnail_pane_visibility_changed
+        )
+        self.thumbnail_list.verticalScrollBar().valueChanged.connect(
+            self._on_thumbnail_scrolled
+        )
 
         self._slideshow_interval_ms = 3000
         self._slideshow_timer = QTimer(self)
@@ -588,6 +665,14 @@ class MainWindow(QMainWindow):
     def _set_image_list(self, image_paths: list[Path], index: int) -> None:
         self.image_paths = image_paths
         self.current_dir = image_paths[0].parent if image_paths else None
+        self._thumbnail_token += 1
+        self._thumbnail_pending.clear()
+        self._thumbnail_deferred_timer.stop()
+        self._thumbnail_deferred_token = -1
+        self._thumbnail_deferred_order = []
+        self._thumbnail_deferred_pos = 0
+        if len(self._thumbnail_cache) > 1200:
+            self._thumbnail_cache.clear()
         self._populate_thumbnails()
         self._show_image_at_index(index)
 
@@ -597,23 +682,168 @@ class MainWindow(QMainWindow):
     def _populate_thumbnails(self) -> None:
         self.thumbnail_list.blockSignals(True)
         self.thumbnail_list.clear()
+        self.thumbnail_list.blockSignals(False)
 
-        for image_path in self.image_paths:
+        self._thumbnail_populate_token = self._thumbnail_token
+        self._thumbnail_populate_index = 0
+        QTimer.singleShot(0, self._populate_thumbnails_step)
+
+    def _populate_thumbnails_step(self) -> None:
+        if self._thumbnail_populate_token != self._thumbnail_token:
+            return
+
+        batch_size = 250
+        placeholder_icon = self.style().standardIcon(QStyle.SP_FileIcon)
+
+        end = min(len(self.image_paths), self._thumbnail_populate_index + batch_size)
+        self.thumbnail_list.blockSignals(True)
+        for i in range(self._thumbnail_populate_index, end):
+            image_path = self.image_paths[i]
             item = QListWidgetItem(image_path.name)
-            pixmap = QPixmap(str(image_path))
-            if not pixmap.isNull():
-                thumbnail = pixmap.scaled(
-                    self.thumbnail_icon_size.width(),
-                    self.thumbnail_icon_size.height(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation,
-                )
-                item.setData(Qt.UserRole, thumbnail)
-                item.setIcon(QIcon(thumbnail))
+            cached = self._thumbnail_cache.get(image_path)
+            if isinstance(cached, QPixmap) and not cached.isNull():
+                item.setData(Qt.UserRole, cached)
+                item.setIcon(QIcon(cached))
+            else:
+                item.setIcon(placeholder_icon)
             item.setToolTip(str(image_path))
             self.thumbnail_list.addItem(item)
-
         self.thumbnail_list.blockSignals(False)
+
+        if self.current_index >= 0 and self.current_index < self.thumbnail_list.count():
+            self.thumbnail_list.blockSignals(True)
+            self.thumbnail_list.setCurrentRow(self.current_index)
+            self.thumbnail_list.blockSignals(False)
+
+        self._thumbnail_populate_index = end
+        if end < len(self.image_paths):
+            QTimer.singleShot(0, self._populate_thumbnails_step)
+            return
+
+        if self.thumbnail_dock.isVisible():
+            center = self.current_index if self.current_index >= 0 else 0
+            self._ensure_thumbnail_window(center, restart_deferred=True)
+
+    def _on_thumbnail_pane_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            center = self.current_index if self.current_index >= 0 else 0
+            self._ensure_thumbnail_window(center, restart_deferred=True)
+
+    def _on_thumbnail_scrolled(self, value: int) -> None:
+        if not self.thumbnail_dock.isVisible():
+            return
+        pos = self.thumbnail_list.viewport().rect().center()
+        index = self.thumbnail_list.indexAt(QPoint(pos.x(), pos.y())).row()
+        if index < 0:
+            return
+        self._ensure_thumbnail_window(index, restart_deferred=False)
+
+    def _queue_thumbnail_task(self, token: int, index: int) -> None:
+        if index in self._thumbnail_pending:
+            return
+        if not (0 <= index < len(self.image_paths)):
+            return
+        image_path = self.image_paths[index]
+        cached = self._thumbnail_cache.get(image_path)
+        if isinstance(cached, QPixmap) and not cached.isNull():
+            return
+        self._thumbnail_pending.add(index)
+        task = _ThumbnailTask(
+            token=token,
+            index=index,
+            image_path=image_path,
+            max_size=self._thumbnail_decode_size,
+            emitter=self._thumbnail_emitter,
+        )
+        self._thumbnail_pool.start(task)
+
+    def _priority_indices_around(self, center: int, radius: int) -> list[int]:
+        if not self.image_paths:
+            return []
+        max_index = len(self.image_paths) - 1
+        c = min(max(center, 0), max_index)
+        r = max(0, radius)
+        result: list[int] = []
+        for d in range(0, r + 1):
+            left = c - d
+            if 0 <= left <= max_index and left not in result:
+                result.append(left)
+            right = c + d
+            if 0 <= right <= max_index and right not in result:
+                result.append(right)
+        return result
+
+    def _ensure_thumbnail_window(self, center: int, restart_deferred: bool) -> None:
+        token = self._thumbnail_token
+        if not self.image_paths:
+            return
+
+        for index in self._priority_indices_around(center, self._thumbnail_priority_radius):
+            self._queue_thumbnail_task(token, index)
+
+        if restart_deferred:
+            self._schedule_thumbnail_deferred(center)
+
+    def _schedule_thumbnail_deferred(self, center: int) -> None:
+        token = self._thumbnail_token
+        if self._thumbnail_deferred_token != token:
+            self._thumbnail_deferred_token = token
+
+        max_index = len(self.image_paths) - 1
+        c = min(max(center, 0), max_index)
+        order: list[int] = []
+        for d in range(self._thumbnail_priority_radius + 1, max_index + 1):
+            left = c - d
+            right = c + d
+            if left >= 0:
+                order.append(left)
+            if right <= max_index:
+                order.append(right)
+            if left < 0 and right > max_index:
+                break
+
+        self._thumbnail_deferred_order = order
+        self._thumbnail_deferred_pos = 0
+        self._thumbnail_deferred_timer.stop()
+        self._thumbnail_deferred_timer.start(0)
+
+    def _process_thumbnail_deferred(self) -> None:
+        token = self._thumbnail_token
+        if self._thumbnail_deferred_token != token:
+            return
+
+        chunk_size = 240
+        end = min(
+            len(self._thumbnail_deferred_order),
+            self._thumbnail_deferred_pos + chunk_size,
+        )
+        for i in range(self._thumbnail_deferred_pos, end):
+            self._queue_thumbnail_task(token, self._thumbnail_deferred_order[i])
+        self._thumbnail_deferred_pos = end
+        if self._thumbnail_deferred_pos < len(self._thumbnail_deferred_order):
+            self._thumbnail_deferred_timer.start(0)
+
+    def _on_thumbnail_ready(self, token: int, index: int, image: object) -> None:
+        if token != self._thumbnail_token:
+            return
+        self._thumbnail_pending.discard(index)
+        if not (0 <= index < self.thumbnail_list.count()):
+            return
+        if not hasattr(image, "isNull") or image.isNull():
+            return
+
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
+            return
+        item = self.thumbnail_list.item(index)
+        if item is None:
+            return
+        path = self.image_paths[index] if index < len(self.image_paths) else None
+        if isinstance(path, Path):
+            self._thumbnail_cache[path] = pixmap
+        item.setData(Qt.UserRole, pixmap)
+        item.setIcon(QIcon(pixmap))
+        self.thumbnail_list.viewport().update()
 
     def _show_image_at_index(self, index: int, animated: bool = False) -> None:
         if not (0 <= index < len(self.image_paths)):
@@ -630,13 +860,18 @@ class MainWindow(QMainWindow):
             return
 
         self.current_index = index
-        self.thumbnail_list.blockSignals(True)
-        self.thumbnail_list.setCurrentRow(index)
-        self.thumbnail_list.scrollToItem(self.thumbnail_list.item(index))
-        self.thumbnail_list.blockSignals(False)
+        if index < self.thumbnail_list.count():
+            self.thumbnail_list.blockSignals(True)
+            self.thumbnail_list.setCurrentRow(index)
+            item = self.thumbnail_list.item(index)
+            if item is not None:
+                self.thumbnail_list.scrollToItem(item)
+            self.thumbnail_list.blockSignals(False)
         self.path_label.setText(str(image_path))
         self._update_status()
         self._update_actions()
+        if self.thumbnail_dock.isVisible():
+            self._ensure_thumbnail_window(index, restart_deferred=True)
 
     def _on_thumbnail_selected(self, row: int) -> None:
         if row >= 0 and row != self.current_index:

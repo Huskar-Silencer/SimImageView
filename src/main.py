@@ -3,12 +3,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from app import ImageViewMainWindow, create_app
+from app import SimImageViewMainWindow, create_app
 
 
 def main() -> int:
     app = create_app()
-    window = ImageViewMainWindow()
+    window = SimImageViewMainWindow()
 
     if len(sys.argv) > 1:
         window.load_from_path(Path(sys.argv[1]).expanduser().resolve())

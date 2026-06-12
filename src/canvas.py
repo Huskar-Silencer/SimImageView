@@ -408,7 +408,7 @@ class ImageCanvas(GraphView):
         app = QApplication.instance()
         icon = QIcon()
         if app is not None:
-            icon = app.style().standardIcon(QStyle.SP_FileDialogContentsView)
+            icon = app.style().standardIcon(QStyle.SP_DialogOpenButton)
         pixmap = icon.pixmap(128, 128)
         if pixmap.isNull():
             pixmap = QPixmap(128, 128)

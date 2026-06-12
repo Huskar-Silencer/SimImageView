@@ -169,7 +169,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-class ImageViewMainWindow(QMainWindow):
+class SimImageViewMainWindow(QMainWindow):
 
     DEFAULT_SLICESHOW_INTERVAL_MS = 3000
 
@@ -231,7 +231,7 @@ class ImageViewMainWindow(QMainWindow):
         else:
             self.showNormal()
 
-    def _init_window_base_value(self: ImageViewMainWindow):
+    def _init_window_base_value(self: SimImageViewMainWindow):
         self.setWindowTitle("PySide6 Image Viewer")
         self.resize(1400, 900)
         self.setAcceptDrops(True)
@@ -249,7 +249,7 @@ class ImageViewMainWindow(QMainWindow):
         self.current_index = -1
         self.current_dir: Path | None = None
 
-    def _init_window_thumbnail(self: ImageViewMainWindow):
+    def _init_window_thumbnail(self: SimImageViewMainWindow):
         self.thumbnail_icon_size = QSize(120, 120)
         self.thumbnail_grid_size = QSize(160, 170)
 
@@ -307,23 +307,25 @@ class ImageViewMainWindow(QMainWindow):
             self._on_thumbnail_scrolled
         )
 
-    def _init_window_sliceshow(self: ImageViewMainWindow):
-        self._slideshow_interval_ms = ImageViewMainWindow.DEFAULT_SLICESHOW_INTERVAL_MS
+    def _init_window_sliceshow(self: SimImageViewMainWindow):
+        self._slideshow_interval_ms = (
+            SimImageViewMainWindow.DEFAULT_SLICESHOW_INTERVAL_MS
+        )
         self._slideshow_timer = QTimer(self)
         self._slideshow_timer.timeout.connect(self._slideshow_next)
 
-    def _init_window_status_bar(self: ImageViewMainWindow):
+    def _init_window_status_bar(self: SimImageViewMainWindow):
         status_bar = QStatusBar(self)
         status_bar.addWidget(self.path_label, 1)
         status_bar.addPermanentWidget(self.info_label)
         self.setStatusBar(status_bar)
 
-    def _init_window_label(self: ImageViewMainWindow):
+    def _init_window_label(self: SimImageViewMainWindow):
         self.path_label = QLabel("No image opened")
         self.path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.info_label = QLabel("")
 
-    def _init_window_action(self: ImageViewMainWindow):
+    def _init_window_action(self: SimImageViewMainWindow):
         self._create_actions()
         self._create_menus()
         self._create_toolbar()
